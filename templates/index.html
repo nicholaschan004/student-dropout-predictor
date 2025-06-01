@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Success Predictor</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            padding-top: 2rem;
+        }
+        .prediction-card {
+            display: none;
+            transition: all 0.3s ease;
+        }
+        .card {
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .success { color: #198754; }
+        .warning { color: #ffc107; }
+        .danger { color: #dc3545; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header bg-primary text-white">
+                        <h3 class="mb-0">Student Success Predictor</h3>
+                    </div>
+                    <div class="card-body">
+                        <form id="predictionForm">
+                            <div class="mb-3">
+                                <label for="units_approved" class="form-label">Units Approved</label>
+                                <input type="number" class="form-control" id="units_approved" required min="0">
+                            </div>
+                            <div class="mb-3">
+                                <label for="units_grade" class="form-label">Units Grade</label>
+                                <input type="number" class="form-control" id="units_grade" required min="0" step="0.1">
+                            </div>
+                            <div class="mb-3">
+                                <label for="units_enrolled" class="form-label">Units Enrolled</label>
+                                <input type="number" class="form-control" id="units_enrolled" required min="0">
+                            </div>
+                            <div class="mb-3">
+                                <label for="tuition_up_to_date" class="form-label">Tuition Up to Date</label>
+                                <input type="number" class="form-control" id="tuition_up_to_date" required min="0" max="1" step="1">
+                            </div>
+                            <div class="mb-3">
+                                <label for="units_evaluations" class="form-label">Units Evaluations</label>
+                                <input type="number" class="form-control" id="units_evaluations" required min="0">
+                            </div>
+                            <div class="mb-3">
+                                <label for="age" class="form-label">Age at Enrollment</label>
+                                <input type="number" class="form-control" id="age" required min="0" max="100" step="1">
+                            </div>
+                            <div class="mb-3">
+                                <label for="unemployment_rate" class="form-label">Unemployment Rate</label>
+                                <input type="number" class="form-control" id="unemployment_rate" required min="0" max="20" step="0.1">
+                            </div>
+                            <div class="mb-3">
+                                <label for="target" class="form-label">Target</label>
+                                <select class="form-select" id="target" required>
+                                    <option value="0">0</option>
+                                    <option value="1">1</option>
+                                </select>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary">Predict</button>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card mt-4 prediction-card" id="predictionResult">
+                    <div class="card-body text-center">
+                        <h4 class="mb-3">Prediction Result</h4>
+                        <p class="h5 mb-2">Prediction: <span id="predictionStatus" class="fw-bold"></span> (<span id="predictionConfidence"></span>% confidence)</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.getElementById('predictionForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            console.log('Form submitted');
+            
+            const data = {
+                units_approved: parseInt(document.getElementById('units_approved').value),
+                units_grade: parseFloat(document.getElementById('units_grade').value),
+                units_enrolled: parseInt(document.getElementById('units_enrolled').value),
+                tuition_up_to_date: parseInt(document.getElementById('tuition_up_to_date').value),
+                units_evaluations: parseInt(document.getElementById('units_evaluations').value),
+                age: parseInt(document.getElementById('age').value),
+                unemployment_rate: parseFloat(document.getElementById('unemployment_rate').value),
+                target: parseInt(document.getElementById('target').value)
+            };
+            console.log('Data:', data);
+        
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+                console.log('Response:', response);
+                
+                if (response.redirected) {
+                    window.location.href = response.url;
+                } else {
+                    const result = await response.json();
+                    console.error('Error:', result.message);
+                    alert('Error: ' + result.message);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error making prediction: ' + error.message);
+            }
+        });
+    </script>
+</body>
+</html>
