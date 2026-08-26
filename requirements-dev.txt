@@ -1,0 +1,6 @@
+# Everything in requirements.txt, plus the charting libraries the notebook uses.
+# Kept separate so the deployed function does not ship matplotlib and seaborn.
+-r requirements.txt
+
+matplotlib>=3.8
+seaborn>=0.13

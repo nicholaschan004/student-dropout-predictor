@@ -5,22 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Prediction Results - Student Success Predictor</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
-        body {
-            background-color: #f8f9fa;
-            padding-top: 2rem;
-        }
-        .card {
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
+        body { background-color: #f8f9fa; padding: 2rem 0; }
+        .card { box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); }
         .success { color: #198754; }
         .warning { color: #ffc107; }
         .danger { color: #dc3545; }
-        #chartContainer {
-            height: 300px;
-            margin-top: 2rem;
-        }
+        #chartContainer { height: 300px; margin-top: 2rem; }
     </style>
 </head>
 <body>
@@ -32,14 +24,17 @@
                         <h3 class="mb-0">Prediction Results</h3>
                     </div>
                     <div class="card-body text-center">
-                        <h4 class="mb-4">Student is <span id="predictionStatus" class="fw-bold"></span></h4>
-                        <p class="h5 mb-4">Confidence: <span id="predictionConfidence"></span>%</p>
-                        
-                        <div id="chartContainer">
-                            <canvas id="predictionChart"></canvas>
+                        <div id="resultBody">
+                            <h4 class="mb-4">Student is <span id="predictionStatus" class="fw-bold"></span></h4>
+                            <p class="h5 mb-4">Confidence: <span id="predictionConfidence" class="fw-bold"></span>%</p>
+
+                            <div id="chartContainer">
+                                <canvas id="predictionChart"></canvas>
+                            </div>
                         </div>
-                        <div id="heatmapContainer" style="height: 200px; margin-top: 2rem;">
-                            <canvas id="heatmapChart"></canvas>
+
+                        <div id="missingData" class="alert alert-warning d-none" role="alert">
+                            No prediction to show. Start from the form to make one.
                         </div>
 
                         <div class="mt-4">
@@ -51,116 +46,73 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Get prediction data from URL parameters
-        const urlParams = new URLSearchParams(window.location.search);
-        const prediction = urlParams.get('prediction');
-        const confidence = urlParams.get('confidence');
-        const probabilities = JSON.parse(decodeURIComponent(urlParams.get('probabilities')));
+        // Labels are in the model's class order, so probabilities[i] belongs to
+        // LABELS[i]. Changing one without the other silently mislabels the chart.
+        const LABELS = ['Dropout', 'Graduate', 'Enrolled'];
+        const COLORS = ['#dc3545', '#198754', '#ffc107'];
 
-        // Update text elements
-        document.getElementById('predictionStatus').textContent = `Likely to ${prediction}`;
-        document.getElementById('predictionConfidence').textContent = confidence;
+        const params = new URLSearchParams(window.location.search);
+        const prediction = params.get('prediction');
+        const confidence = params.get('confidence');
+        const probabilities = (params.get('probabilities') || '')
+            .split(',')
+            .map(Number);
 
-        // Set prediction status color
-        const statusElement = document.getElementById('predictionStatus');
-        if (prediction === 'Graduate') {
-            statusElement.classList.add('success');
-        } else if (prediction === 'Enrolled') {
-            statusElement.classList.add('warning');
+        const hasResult =
+            LABELS.includes(prediction) &&
+            confidence !== null &&
+            probabilities.length === LABELS.length &&
+            probabilities.every(Number.isFinite);
+
+        // Someone can land here with no query string, from a bookmark or a
+        // shared link. Show the empty state rather than a half rendered page.
+        if (!hasResult) {
+            document.getElementById('resultBody').classList.add('d-none');
+            document.getElementById('missingData').classList.remove('d-none');
         } else {
-            statusElement.classList.add('danger');
-        }
+            const statusElement = document.getElementById('predictionStatus');
+            const confidenceElement = document.getElementById('predictionConfidence');
 
-        // Create bar chart
-        const ctx = document.getElementById('predictionChart').getContext('2d');
-        new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: ['Graduate', 'Enrolled', 'Dropout'],
-                datasets: [{
-                    label: 'Probability',
-                    data: probabilities,
-                    backgroundColor: [
-                        '#198754',  // success
-                        '#ffc107',  // warning
-                        '#dc3545'   // danger
-                    ],
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        max: 1,
-                        ticks: {
-                            callback: function(value) {
-                                return (value * 100) + '%';
-                            }
-                        }
-                    }
-                },
-                plugins: {
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                return `Probability: ${(context.raw * 100).toFixed(2)}%`;
-                            }
-                        }
-                    }
-                }
-            }
-        });
+            statusElement.textContent = `Likely to ${prediction}`;
+            confidenceElement.textContent = confidence;
 
-        // Create heatmap (simple horizontal heatmap using bar chart)
-        const heatmapCtx = document.getElementById('heatmapChart').getContext('2d');
-        new Chart(heatmapCtx, {
-            type: 'bar',
-            data: {
-                labels: ['Graduate', 'Enrolled', 'Dropout'],
-                datasets: [{
-                    label: 'Heatmap',
-                    data: probabilities,
-                    backgroundColor: probabilities.map((p, i) => {
-                        // Interpolate color from white to the class color based on probability
-                        const colors = ['#198754', '#ffc107', '#dc3545'];
-                        const color = colors[i];
-                        // Simple blend: more intense color for higher probability
-                        return `rgba(${parseInt(color.slice(1,3),16)},${parseInt(color.slice(3,5),16)},${parseInt(color.slice(5,7),16)},${0.2 + 0.8*p})`;
-                    }),
-                    borderWidth: 0
-                }]
-            },
-            options: {
-                indexAxis: 'y',
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                return `Probability: ${(context.raw * 100).toFixed(2)}%`;
-                            }
-                        }
-                    }
+            const tone = { Graduate: 'success', Enrolled: 'warning', Dropout: 'danger' }[prediction];
+            statusElement.classList.add(tone);
+            confidenceElement.classList.add(tone);
+
+            new Chart(document.getElementById('predictionChart').getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: LABELS,
+                    datasets: [{
+                        label: 'Probability',
+                        data: probabilities,
+                        backgroundColor: COLORS,
+                        borderWidth: 1,
+                    }],
                 },
-                scales: {
-                    x: {
-                        beginAtZero: true,
-                        max: 1,
-                        display: false
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 1,
+                            ticks: { callback: (value) => `${value * 100}%` },
+                        },
                     },
-                    y: {
-                        grid: { display: false }
-                    }
-                }
-            }
-        });
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => `Probability: ${(context.raw * 100).toFixed(2)}%`,
+                            },
+                        },
+                    },
+                },
+            });
+        }
     </script>
 </body>
 </html>

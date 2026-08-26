@@ -1,84 +1,107 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for
-import json
-from sklearn.preprocessing import StandardScaler
-import numpy as np
-import joblib
+"""Flask front end for the dropout classifier.
+
+The model and scaler are loaded at import time rather than inside a
+`__main__` block, so this module works unchanged under a WSGI server
+(gunicorn, Vercel) and not only under `python app.py`.
+"""
+
 import os
+
+import joblib
+import pandas as pd
+from flask import Flask, jsonify, redirect, render_template, request, url_for
+
+from config import CLASS_LABELS, FEATURES, MODEL_PATH, SCALER_PATH
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app = Flask(__name__)
 
-# Initialize these as None, they will be loaded when the model is trained
-model = None
-scaler = None
+model = joblib.load(os.path.join(BASE_DIR, MODEL_PATH))
+scaler = joblib.load(os.path.join(BASE_DIR, SCALER_PATH))
 
-@app.route('/')
+# Maps the JSON keys the form posts onto the column names the scaler was fitted
+# with, and states the range each one is allowed to take. Anything outside these
+# is a typo rather than a student, and extrapolating on it would be dishonest.
+FIELDS = {
+    "units_approved": ("Curricular units 2nd sem (approved)", 0, 30),
+    "units_grade": ("Curricular units 2nd sem (grade)", 0, 20),
+    "units_enrolled": ("Curricular units 2nd sem (enrolled)", 0, 30),
+    "tuition_up_to_date": ("Tuition fees up to date", 0, 1),
+    "units_evaluations": ("Curricular units 2nd sem (evaluations)", 0, 40),
+    "age": ("Age at enrollment", 16, 80),
+    "unemployment_rate": ("Unemployment rate", 0, 30),
+}
+
+
+class InvalidInput(Exception):
+    pass
+
+
+def parse_features(payload):
+    """Turn the posted JSON into a one row DataFrame, or raise InvalidInput."""
+    if not isinstance(payload, dict):
+        raise InvalidInput("expected a JSON object")
+
+    row = {}
+    for key, (column, low, high) in FIELDS.items():
+        if key not in payload:
+            raise InvalidInput(f"missing field: {key}")
+        try:
+            value = float(payload[key])
+        except (TypeError, ValueError):
+            raise InvalidInput(f"{key} must be a number")
+        if value != value or value in (float("inf"), float("-inf")):
+            raise InvalidInput(f"{key} must be a finite number")
+        if not low <= value <= high:
+            raise InvalidInput(f"{key} must be between {low} and {high}")
+        row[column] = value
+
+    # Column order matters: the scaler and model were fitted on FEATURES.
+    return pd.DataFrame([[row[c] for c in FEATURES]], columns=FEATURES)
+
+
+@app.route("/")
 def home():
-    return render_template('index.html')
+    return render_template("index.html")
 
-@app.route('/results')
+
+@app.route("/results")
 def results():
-    return render_template('results.html')
+    return render_template("results.html")
 
-@app.route('/predict', methods=['POST'])
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok", "classes": CLASS_LABELS})
+
+
+@app.route("/predict", methods=["POST"])
 def predict():
     try:
-        # Get data from request
-        data = request.get_json()
-        
-        # Extract features from the form data
-        features = [
-            float(data['units_approved']),  # Curricular units 2nd sem (approved)
-            float(data['units_grade']),     # Curricular units 2nd sem (grade)
-            float(data['units_enrolled']),  # Curricular units 2nd sem (enrolled)
-            float(data['tuition_up_to_date']),  # Tuition fees up to date
-            float(data['units_evaluations']),  # Curricular units 2nd sem (evaluations)
-            float(data['age']),            # Age at enrollment
-            float(data['unemployment_rate'])  # Unemployment rate
-        ]
-        
-        # Reshape and scale the features
-        features = np.array(features).reshape(1, -1)
-        if scaler is not None:
-            features = scaler.transform(features)
-        
-        # Make prediction
-        if model is not None:
-            prediction = model.predict(features)
-            probabilities = model.predict_proba(features)[0]
-            
-            # Get the highest probability
-            max_prob = max(probabilities)
-            confidence = round(max_prob * 100, 2)
-            
-            # Map prediction to class label
-            class_labels = ['Dropout', 'Enrolled', 'Graduate']
-            predicted_class = class_labels[prediction[0]]
-            
-            # Redirect to results page with parameters
-            from flask import redirect, url_for
-            import json
-            return redirect(url_for('results', 
-                prediction=predicted_class,
-                confidence=confidence,
-                probabilities=json.dumps(probabilities.tolist())
-            ))
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': 'Model not loaded'
-            })
-            
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        })
+        features = parse_features(request.get_json(silent=True))
+    except InvalidInput as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
 
-if __name__ == '__main__':
-    # Load the logistic regression model and scaler
-    if os.path.exists('model.joblib'):
-        model = joblib.load('model.joblib')
-    if os.path.exists('scaler.joblib'):
-        scaler = joblib.load('scaler.joblib')
-    
-    app.run(debug=True, port=8080)
+    scaled = pd.DataFrame(scaler.transform(features), columns=FEATURES)
+    probabilities = model.predict_proba(scaled)[0]
+
+    # argmax of predict_proba rather than a second predict() call, so the label
+    # shown can never disagree with the bar that is tallest in the chart.
+    index = int(probabilities.argmax())
+
+    return redirect(
+        url_for(
+            "results",
+            prediction=CLASS_LABELS[index],
+            confidence=round(float(probabilities[index]) * 100, 2),
+            probabilities=",".join(f"{p:.6f}" for p in probabilities),
+        )
+    )
+
+
+if __name__ == "__main__":
+    app.run(
+        debug=os.environ.get("FLASK_DEBUG", "").lower() in {"1", "true", "yes"},
+        port=int(os.environ.get("PORT", 8080)),
+    )
